@@ -26,6 +26,8 @@ either expressed or implied, of the Regents of The University of Michigan.
 */
 
 #include "cstring"
+#include "csignal"
+#include "cstdlib"
 #include "string"
 #include <iomanip>
 #include <iostream>
@@ -56,6 +58,11 @@ extern "C" {
 using namespace std;
 using namespace cv;
 
+void handle_sigint(int signal) {
+  cout << "\nCaught SIGINT (Ctrl+C). Exiting...\n";
+  exit(signal);
+}
+
 int main(int argc, char *argv[]) {
   getopt_t *getopt = getopt_create();
 
@@ -80,6 +87,9 @@ int main(int argc, char *argv[]) {
     exit(0);
   }
 
+  // Register signal handler
+  signal(SIGINT, handle_sigint);
+
   // setup UDP socket
   const char *peer_ip = getopt_get_string(getopt, "addr");
   int peer_port = getopt_get_int(getopt, "port");
@@ -102,7 +112,7 @@ int main(int argc, char *argv[]) {
   meter.start();
 
   // Initialize camera
-  VideoCapture cap(getopt_get_int(getopt, "camera"), cv::CAP_AVFOUNDATION);
+  VideoCapture cap(getopt_get_int(getopt, "camera"));
   if (!cap.isOpened()) {
     cerr << "Couldn't open video capture device" << endl;
     return -1;
@@ -171,6 +181,8 @@ int main(int argc, char *argv[]) {
   while (true) {
     errno = 0;
     cap >> frame;
+    meter.reset();
+    meter.start();
     cvtColor(frame, gray, COLOR_BGR2GRAY);
 
     // Make an image_u8_t header for the Mat data
@@ -187,14 +199,14 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < zarray_size(detections); i++) {
       apriltag_detection_t *det;
       zarray_get(detections, i, &det);
-      line(frame, Point(det->p[0][0], det->p[0][1]),
-           Point(det->p[1][0], det->p[1][1]), Scalar(0, 0xff, 0), 2);
-      line(frame, Point(det->p[0][0], det->p[0][1]),
-           Point(det->p[3][0], det->p[3][1]), Scalar(0, 0, 0xff), 2);
-      line(frame, Point(det->p[1][0], det->p[1][1]),
-           Point(det->p[2][0], det->p[2][1]), Scalar(0xff, 0, 0), 2);
-      line(frame, Point(det->p[2][0], det->p[2][1]),
-           Point(det->p[3][0], det->p[3][1]), Scalar(0xff, 0, 0), 2);
+      // line(frame, Point(det->p[0][0], det->p[0][1]),
+      //      Point(det->p[1][0], det->p[1][1]), Scalar(0, 0xff, 0), 2);
+      // line(frame, Point(det->p[0][0], det->p[0][1]),
+      //      Point(det->p[3][0], det->p[3][1]), Scalar(0, 0, 0xff), 2);
+      // line(frame, Point(det->p[1][0], det->p[1][1]),
+      //      Point(det->p[2][0], det->p[2][1]), Scalar(0xff, 0, 0), 2);
+      // line(frame, Point(det->p[2][0], det->p[2][1]),
+      //      Point(det->p[3][0], det->p[3][1]), Scalar(0xff, 0, 0), 2);
 
       // get pose of tag
       apriltag_detection_info_t info;
@@ -208,16 +220,16 @@ int main(int argc, char *argv[]) {
 
       // send UDP packet
       stringstream idss;
-      idss << det->id;
-      String text = idss.str();
-      int fontface = FONT_HERSHEY_COMPLEX;
-      double fontscale = 1.0;
-      int baseline;
-      Size textsize = getTextSize(text, fontface, fontscale, 2, &baseline);
-      putText(frame, text,
-              Point(det->c[0] - textsize.width / 2,
-                    det->c[1] + textsize.height / 2),
-              fontface, fontscale, Scalar(0xff, 0x99, 0), 2);
+      // idss << det->id;
+      // String text = idss.str();
+      // int fontface = FONT_HERSHEY_COMPLEX;
+      // double fontscale = 1.0;
+      // int baseline;
+      // Size textsize = getTextSize(text, fontface, fontscale, 2, &baseline);
+      // putText(frame, text,
+      //         Point(det->c[0] - textsize.width / 2,
+      //               det->c[1] + textsize.height / 2),
+      //         fontface, fontscale, Scalar(0xff, 0x99, 0), 2);
 
       double err = estimate_tag_pose(&info, &pose);
       Eigen::Vector3d position(pose.t->data[0], pose.t->data[1], pose.t->data[2]);
@@ -226,7 +238,7 @@ int main(int argc, char *argv[]) {
                         pose.R->data[3],pose.R->data[4],pose.R->data[5],
                         pose.R->data[6],pose.R->data[7],pose.R->data[8];
       Eigen::Vector3d newPosition = rotationMatrix * position;
-      cout << newPosition(0) << ", " << newPosition(1) << ", " << newPosition(2) << endl;
+      cout << newPosition(0) << ", " << newPosition(1) << ", " << newPosition(2);
         
       const int message_size = sizeof(int) + sizeof(double) * 13;
       char *message = (char *)malloc(message_size);
@@ -248,9 +260,12 @@ int main(int argc, char *argv[]) {
 
     apriltag_detections_destroy(detections);
 
-    imshow("Tag Detections", frame);
-    if (waitKey(30) >= 0)
-      break;
+    // imshow("Tag Detections", frame);
+    // if (waitKey(1) >= 0)
+    //   break;
+    meter.stop();
+    cout << "last frame took " << std::fixed
+       << std::setprecision(3) << meter.getTimeMilli() << " milliseconds to process" << endl;
   }
 
   apriltag_detector_destroy(td);
